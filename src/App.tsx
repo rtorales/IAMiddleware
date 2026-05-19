@@ -3,7 +3,7 @@ import { Dashboard } from "./components/dashboard/MetricsPanel";
 import { useVault } from "./hooks/useVault";
 
 function App() {
-  const { isUnlocked, isLoading } = useVault();
+  const { isUnlocked, isLoading, unlock, error } = useVault();
 
   if (isLoading) {
     return (
@@ -16,7 +16,7 @@ function App() {
   }
 
   if (!isUnlocked) {
-    return <VaultUnlock />;
+    return <VaultUnlock onUnlock={unlock} error={error} />;
   }
 
   return <Dashboard />;

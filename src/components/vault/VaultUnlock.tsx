@@ -1,16 +1,19 @@
 import { useState, FormEvent } from "react";
-import { useVault } from "../../hooks/useVault";
 
-export function VaultUnlock() {
+interface Props {
+  onUnlock: (password: string) => Promise<boolean>;
+  error: string | null;
+}
+
+export function VaultUnlock({ onUnlock, error }: Props) {
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const { unlock, error } = useVault();
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!password.trim()) return;
     setIsSubmitting(true);
-    await unlock(password);
+    await onUnlock(password);
     setIsSubmitting(false);
     setPassword("");
   };

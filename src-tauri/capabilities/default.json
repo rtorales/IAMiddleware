@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for the main window — grants IPC access and core Tauri APIs",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:allow-open"
+  ]
+}

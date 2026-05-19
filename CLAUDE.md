@@ -1,60 +1,92 @@
-# IA Middleware — Guía de Proyecto para Claude Code
+# CLAUDE.md
 
-## Stack Tecnológico
-- **Backend**: Rust (stable toolchain) + Tauri v2
-- **Frontend**: React 18 + TypeScript + Tailwind CSS + Vite
-- **DB local**: SQLite vía `rusqlite` (encriptada AES-256-GCM en bóveda fallback)
-- **Orquestador**: Ollama (qwen2.5:3b router principal, qwen2.5:1.5b clasificador)
-- **HTTP externo**: `reqwest` con `rustls` (NO `openssl` nativo — mantiene binario ligero)
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Prerrequisitos de Entorno (instalar antes de compilar)
+## Stack
+
+- **Backend**: Rust (stable) + Tauri v2 — lógica, red externa, criptografía
+- **Frontend**: React 18 + TypeScript + Vite + Tailwind CSS — UI pasiva únicamente
+- **DB**: SQLite vía `rusqlite` (bundled) — datos en `{data_dir}/ia-middleware/middleware.db`
+- **Vault fallback**: `{data_dir}/ia-middleware/vault.db` (AES-256-GCM + Argon2id)
+- **Orquestador local**: Ollama — qwen2.5:3b (router), qwen2.5:1.5b (clasificador)
+
+## Prerrequisitos
+
 ```
-rustup (stable)    → https://rustup.rs
-cargo-tauri v2     → cargo install tauri-cli --version "^2"
-Ollama             → https://ollama.ai
-Node.js ≥ 18       → ya instalado (v24.15.0)
+rustup (stable)              → winget install Rustlang.Rustup
+cargo install tauri-cli --version "^2"
+Ollama                       → winget install Ollama.Ollama
+Node.js ≥ 18 (ya disponible)
 ```
 
-## Comandos Clave
+## Comandos
+
 ```bash
-npm install                    # Instalar deps frontend
-npm run tauri dev              # Dev con hot-reload
-npm run tauri build            # Release multiplataforma
-cd src-tauri && cargo check    # Verificar Rust sin compilar
-cd src-tauri && cargo test     # Tests unitarios Rust
-cd src-tauri && cargo clippy   # Linting estricto
+npm install                  # deps frontend
+npm run tauri dev            # dev con hot-reload (inicia Vite en :1420 + Tauri)
+npm run tauri build          # release multiplataforma
+
+cd src-tauri
+cargo check                  # verificar sin compilar
+cargo test                   # tests unitarios
+cargo clippy -- -D warnings  # linting — sin warnings tolerados
 ```
 
-## REGLA ABSOLUTA: Aislamiento Criptográfico del Frontend
+## REGLA ABSOLUTA: Aislamiento Criptográfico
 
-> Las llaves API, tokens Bearer y material criptográfico JAMÁS deben
-> aparecer en src/, componentes React, stores Zustand ni payloads IPC.
+Las llaves API, tokens Bearer y material criptográfico **nunca** deben aparecer en `src/`, stores Zustand ni payloads IPC de Tauri.
 
-- Toda petición HTTP a proveedores externos se construye y ejecuta en `src-tauri/`
-- El frontend recibe ÚNICAMENTE: métricas agregadas, estados, textos de respuesta
-- IPC Tauri emite solo eventos de estado/métricas — nunca secretos en el payload
-- Bóveda primaria: crate `keyring` (Windows Credential Manager / macOS Keychain)
-- Bóveda fallback: SQLite + AES-256-GCM derivada con Argon2id desde contraseña maestra
+- Todo HTTP externo (OpenAI, Anthropic, etc.) se construye y ejecuta en `src-tauri/`
+- El frontend recibe únicamente: métricas agregadas, estados booleanos, texto de respuesta
+- Bóveda primaria: crate `keyring` → OS keychain (Windows Credential Manager / macOS Keychain)
+- Bóveda fallback: SQLite + AES-256-GCM; clave derivada con Argon2id (m=64MB, t=3, p=4)
+- Al agregar nuevos comandos IPC, verificar con `/auditoria-cripto` antes de hacer commit
 
-## Convenciones de Código Rust
-- PROHIBIDO: `#[allow(warnings)]`, `#[allow(dead_code)]`, `unwrap()` en prod
-- Propagar errores con `?` y el tipo unificado `AppError` (definido en `error.rs`)
-- Usar `Zeroizing<T>` y `SecretString` del crate `secrecy` para material sensible en memoria
-- Streaming de respuestas LLM: `mpsc::Sender<StreamChunk>` — nunca bufferizar respuesta completa
-- Operaciones DB y red: siempre `async` con `tokio`
+## Arquitectura Rust (`src-tauri/src/`)
 
-## Módulos Rust (`src-tauri/src/`)
 ```
-vault/        → Keyring OS + fallback SQLite AES (gestión de secretos)
-proxy/        → Servidor Axum OpenAI-compatible (port 12434)
-router/       → Motor de enrutamiento semántico multi-objetivo
-providers/    → Adaptadores por proveedor (trait LlmProvider)
-db/           → Esquemas SQLite, migraciones, DAOs
-budget/       → Motor de presupuestos y alertas escalonadas (60/85/100%)
-telemetry/    → Métricas tiempo real: tokens, latencia, tasas de error
+error.rs         → AppError (thiserror) + impl serde::Serialize para IPC
+lib.rs           → AppState { vault: Arc<Vault> }, registro de comandos, entry point
+vault/           → mod.rs selecciona backend (keyring si is_available(), sqlite_vault fallback)
+  kdf.rs         → Argon2id::hash_password_into → [u8; 32] para AES key
+  keyring_vault.rs   → Entry::new(service, account).set/get_password()
+  sqlite_vault.rs    → AES-256-GCM: nonce único por secreto, cipher en Mutex<Option<Aes256Gcm>>
+db/
+  mod.rs         → open_db() abre WAL + foreign_keys y ejecuta migraciones
+  schema.rs      → MIGRATION_V1: todas las tablas DDL + inserts iniciales de providers
 ```
 
-## Política de Cambios
-- NO modificar archivos sin diagramar el cambio primero
-- NO generar bloques masivos de código sin aprobación explícita por módulo
-- Resolver errores de compilación investigando la causa raíz — no silenciar
+**Módulos pendientes (Fases B–E — activar por feature flag):**
+```
+proxy/       → Axum server :12434 (feature "proxy"   → dep:axum)
+providers/   → trait LlmProvider + adaptadores       (feature "providers" → dep:reqwest)
+router/      → OllamaSemanticRouter, scoring τ
+budget/      → tracker.rs + alertas 60/85/100%
+telemetry/   → métricas tiempo real
+```
+Para activar Fase B: en `Cargo.toml` cambiar `[features] default = ["proxy", "providers"]`.
+
+## Patrones de Código Rust
+
+- **Errores**: propagar con `?` hacia `AppError`; nunca `unwrap()` en producción
+- **Secretos en memoria**: `Zeroizing<T>` y `secrecy::SecretString` (se zeroizan en drop)
+- **Streaming LLM**: `mpsc::Sender<StreamChunk>` — nunca bufferizar respuesta completa
+- Prohibido: `#[allow(warnings)]`, `#[allow(dead_code)]`
+
+## Patrones de Código Frontend
+
+- **IPC Tauri v2**: `invoke` desde `@tauri-apps/api/core`; `listen` desde `@tauri-apps/api/event`
+- **Estado**: solo Zustand (`appStore.ts`) — nunca secretos, nunca API keys
+- **Hooks IPC**: cleanup obligatorio → `unlisten.then((fn: () => void) => fn())`
+- **TypeScript**: `strict: true` activo — sin `any` implícito
+
+## Comandos IPC Implementados (Fase A)
+
+```
+get_vault_status  → { unlocked: bool }
+unlock_vault      ← { masterPassword: string }
+lock_vault        ← {}
+store_api_key     ← { provider: string, api_key: string }   // sin retorno del secret
+```
+
+Eventos emitidos al frontend: `vault_locked` (al bloquear por inactividad o cierre de sesión OS).
