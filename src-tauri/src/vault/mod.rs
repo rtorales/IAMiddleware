@@ -16,6 +16,7 @@ use zeroize::Zeroizing;
 
 /// Trait común para ambas implementaciones de bóveda.
 pub trait VaultBackend: Send + Sync {
+    fn unlock(&self, _password: &str) -> AppResult<()> { Ok(()) }
     fn store(&self, service: &str, account: &str, secret: &[u8]) -> AppResult<()>;
     fn retrieve(&self, service: &str, account: &str) -> AppResult<Zeroizing<Vec<u8>>>;
     fn delete(&self, service: &str, account: &str) -> AppResult<()>;
@@ -51,9 +52,7 @@ impl Vault {
     /// Para keyring OS: verifica que el OS permite acceso.
     /// Para SQLite vault: deriva la clave AES con Argon2id.
     pub fn unlock(&self, master_password: &str) -> AppResult<()> {
-        // En keyring OS la "contraseña maestra" es solo verificación de identidad
-        // En SQLite vault es la fuente de la clave AES-256 via Argon2id
-        let _ = master_password; // usado por sqlite_vault en su impl
+        self.backend.unlock(master_password)?;
         self.unlocked.store(true, std::sync::atomic::Ordering::SeqCst);
         tracing::info!("Vault desbloqueada");
         Ok(())

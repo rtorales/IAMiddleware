@@ -89,6 +89,10 @@ impl SqliteVault {
 }
 
 impl VaultBackend for SqliteVault {
+    fn unlock(&self, password: &str) -> AppResult<()> {
+        self.unlock_with_password(password)
+    }
+
     fn store(&self, service: &str, account: &str, secret: &[u8]) -> AppResult<()> {
         let guard = self.get_cipher()?;
         let cipher = guard.as_ref().unwrap();
