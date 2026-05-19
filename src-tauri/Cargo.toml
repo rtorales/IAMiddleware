@@ -46,18 +46,21 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 hex = "0.4"
 dirs = "5"
 
-# HTTP server (proxy) — Fase B, pre-declarado
+# HTTP server (proxy) — Fase B
 axum = { version = "0.7", optional = true }
+tower-http = { version = "0.5", features = ["cors", "trace"], optional = true }
+tokio-stream = { version = "0.1", optional = true }
 
-# HTTP client (providers) — Fase B, pre-declarado
+# HTTP client (providers) — Fase B
 reqwest = { version = "0.12", default-features = false,
             features = ["rustls-tls", "json", "stream"], optional = true }
+async-trait = { version = "0.1", optional = true }
+futures = { version = "0.3", default-features = false, features = ["alloc"], optional = true }
 
 [features]
-# Activar en Fase B:
-# default = ["proxy", "providers"]
-proxy     = ["dep:axum"]
-providers = ["dep:reqwest"]
+default = ["proxy", "providers"]
+proxy     = ["dep:axum", "dep:tower-http", "dep:tokio-stream", "providers"]
+providers = ["dep:reqwest", "dep:async-trait", "dep:futures"]
 
 [profile.release]
 opt-level = 3
