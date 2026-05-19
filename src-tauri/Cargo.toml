@@ -1,0 +1,67 @@
+[package]
+name = "ia-middleware"
+version = "0.1.0"
+description = "IA Middleware — Multi-provider AI API Gateway"
+authors = []
+edition = "2021"
+
+[lib]
+name = "ia_middleware_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Tauri core
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialización
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1" }
+
+# Criptografía — vault (Fase A)
+aes-gcm = "0.10"
+argon2 = "0.5"
+keyring = "3"
+secrecy = { version = "0.8", features = ["serde"] }
+zeroize = { version = "1", features = ["derive"] }
+rand = "0.8"
+
+# Base de datos
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Errores
+thiserror = "1"
+
+# Utilidades
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+hex = "0.4"
+dirs = "5"
+
+# HTTP server (proxy) — Fase B, pre-declarado
+axum = { version = "0.7", optional = true }
+
+# HTTP client (providers) — Fase B, pre-declarado
+reqwest = { version = "0.12", default-features = false,
+            features = ["rustls-tls", "json", "stream"], optional = true }
+
+[features]
+# Activar en Fase B:
+# default = ["proxy", "providers"]
+proxy     = ["dep:axum"]
+providers = ["dep:reqwest"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
