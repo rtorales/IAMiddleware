@@ -10,12 +10,14 @@ use crate::AppState;
 pub struct ProxyState {
     pub app_state: AppState,
     pub app_handle: tauri::AppHandle,
+    pub http_client: reqwest::Client,
 }
 
 pub async fn start_server(state: AppState, app_handle: tauri::AppHandle) {
     let proxy_state = ProxyState {
         app_state: state,
         app_handle,
+        http_client: reqwest::Client::new(),
     };
 
     let cors = CorsLayer::new()

@@ -2,6 +2,7 @@ pub mod db;
 pub mod error;
 pub mod providers;
 pub mod proxy;
+pub mod router;
 pub mod vault;
 
 use std::sync::{Arc, Mutex};
@@ -44,11 +45,16 @@ pub fn run() {
             unlock_vault,
             lock_vault,
             store_api_key,
+            check_api_key,
             // Fase B — Proxy, métricas, presupuestos
             get_metrics_summary,
             list_budget_statuses,
             get_budget_status,
             get_proxy_status,
+            create_budget,
+            // Configuración de router
+            get_routing_config,
+            save_routing_config,
         ])
         .run(tauri::generate_context!())
         .expect("Error al iniciar la aplicación Tauri");
@@ -77,6 +83,13 @@ fn lock_vault(state: State<'_, AppState>) {
 #[tauri::command]
 fn store_api_key(provider: String, api_key: String, state: State<'_, AppState>) -> AppResult<()> {
     state.vault.store_api_key(&provider, &api_key)
+}
+
+/// Indica si ya existe una key para el proveedor. Solo retorna bool — nunca el secreto.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn check_api_key(provider: String, state: State<'_, AppState>) -> bool {
+    state.vault.has_api_key(&provider)
 }
 
 // ══ Fase B — Métricas y proxy ═════════════════════════════════════════════════
@@ -124,6 +137,92 @@ async fn get_budget_status(
         let all = db::query_budgets(&guard)?;
         let found = all.into_iter().find(|b| b["projectTag"] == project_tag);
         Ok(found.unwrap_or(serde_json::Value::Null))
+    })
+    .await
+    .map_err(|e| error::AppError::Config(format!("task: {e}")))?
+}
+
+#[tauri::command]
+async fn create_budget(
+    project_tag: String,
+    limit_usd: f64,
+    period: String,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    let conn = state.db.clone();
+    tokio::task::spawn_blocking(move || {
+        let guard = conn.lock().map_err(|_| error::AppError::Config("db lock poisoned".into()))?;
+        let now = chrono::Utc::now().timestamp_millis();
+        let id = uuid::Uuid::new_v4().to_string();
+        guard.execute(
+            "INSERT INTO budgets
+             (id,project_tag,limit_usd,period,period_start_at,spent_usd,created_at,updated_at)
+             VALUES (?1,?2,?3,?4,?5,0.0,?5,?5)
+             ON CONFLICT(project_tag) DO UPDATE
+             SET limit_usd=?3, period=?4, updated_at=?5,
+                 alert_60_sent_at=NULL, alert_85_sent_at=NULL, hard_locked_at=NULL",
+            rusqlite::params![id, project_tag, limit_usd, period, now],
+        )?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| error::AppError::Config(format!("task: {e}")))?
+}
+
+#[tauri::command]
+async fn get_routing_config(state: State<'_, AppState>) -> AppResult<serde_json::Value> {
+    let conn = state.db.clone();
+    tokio::task::spawn_blocking(move || {
+        let guard = conn.lock().map_err(|_| error::AppError::Config("db lock poisoned".into()))?;
+        let row = guard.query_row(
+            "SELECT tau, ollama_router_url, router_model, classifier_model,
+                    complexity_threshold_low, complexity_threshold_high, fallback_to_local
+             FROM routing_config WHERE id = 'singleton'",
+            [],
+            |row| Ok(serde_json::json!({
+                "tau":                     row.get::<_,f64>(0)?,
+                "ollamaRouterUrl":         row.get::<_,String>(1)?,
+                "routerModel":             row.get::<_,String>(2)?,
+                "classifierModel":         row.get::<_,String>(3)?,
+                "complexityThresholdLow":  row.get::<_,f64>(4)?,
+                "complexityThresholdHigh": row.get::<_,f64>(5)?,
+                "fallbackToLocal":         row.get::<_,bool>(6)?,
+            })),
+        ).map_err(|e| error::AppError::Config(e.to_string()))?;
+        Ok(row)
+    })
+    .await
+    .map_err(|e| error::AppError::Config(format!("task: {e}")))?
+}
+
+#[tauri::command]
+async fn save_routing_config(
+    tau: f64,
+    ollama_router_url: String,
+    router_model: String,
+    classifier_model: String,
+    complexity_threshold_low: f64,
+    complexity_threshold_high: f64,
+    fallback_to_local: bool,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    let conn = state.db.clone();
+    tokio::task::spawn_blocking(move || {
+        let guard = conn.lock().map_err(|_| error::AppError::Config("db lock poisoned".into()))?;
+        let now = chrono::Utc::now().timestamp_millis();
+        guard.execute(
+            "UPDATE routing_config SET
+               tau=?1, ollama_router_url=?2, router_model=?3,
+               classifier_model=?4, complexity_threshold_low=?5,
+               complexity_threshold_high=?6, fallback_to_local=?7, updated_at=?8
+             WHERE id='singleton'",
+            rusqlite::params![
+                tau, ollama_router_url, router_model, classifier_model,
+                complexity_threshold_low, complexity_threshold_high,
+                fallback_to_local, now
+            ],
+        )?;
+        Ok(())
     })
     .await
     .map_err(|e| error::AppError::Config(format!("task: {e}")))?

@@ -3,7 +3,7 @@
 
 use argon2::{
     password_hash::{rand_core::OsRng, SaltString},
-    Argon2, Params, PasswordHasher,
+    Argon2, Params,
 };
 use zeroize::Zeroizing;
 use crate::error::{AppError, AppResult};

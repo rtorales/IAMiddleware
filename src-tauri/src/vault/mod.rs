@@ -79,6 +79,14 @@ impl Vault {
         self.backend.retrieve("ia-middleware", provider)
     }
 
+    /// Retorna true si existe una key para el proveedor — nunca expone el secreto.
+    pub fn has_api_key(&self, provider: &str) -> bool {
+        self.is_unlocked()
+            && self.backend.retrieve("ia-middleware", provider)
+                .map(|k| !k.is_empty())
+                .unwrap_or(false)
+    }
+
     fn require_unlocked(&self) -> AppResult<()> {
         if self.is_unlocked() {
             Ok(())

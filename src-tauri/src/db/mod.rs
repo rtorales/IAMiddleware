@@ -1,8 +1,10 @@
 pub mod schema;
+pub mod pricing;
 
 use rusqlite::Connection;
 use serde_json::json;
 use std::{path::PathBuf, sync::Arc};
+use tauri::Emitter;
 use crate::error::{AppError, AppResult};
 
 pub fn open_db() -> AppResult<Connection> {
@@ -160,6 +162,86 @@ pub fn query_budgets(conn: &Connection) -> AppResult<Vec<serde_json::Value>> {
         .collect();
 
     Ok(rows)
+}
+
+/// Incrementa spent_usd del budget y dispara alertas si cruza umbrales.
+/// No hace nada si no existe un budget para ese project_tag.
+pub fn update_budget_and_alerts(
+    conn: &Connection,
+    handle: &tauri::AppHandle,
+    project_tag: &str,
+    cost_usd: f64,
+) {
+    if cost_usd <= 0.0 {
+        return;
+    }
+
+    let row: rusqlite::Result<(f64, f64, Option<i64>, Option<i64>, Option<i64>)> = conn.query_row(
+        "SELECT spent_usd, limit_usd, hard_locked_at, alert_60_sent_at, alert_85_sent_at
+         FROM budgets WHERE project_tag = ?1",
+        rusqlite::params![project_tag],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+    );
+
+    let (spent, limit, hard_locked, sent_60, sent_85) = match row {
+        Ok(r) => r,
+        Err(_) => return,
+    };
+
+    if hard_locked.is_some() {
+        return;
+    }
+
+    let new_spent = spent + cost_usd;
+    let now = chrono::Utc::now().timestamp_millis();
+
+    let _ = conn.execute(
+        "UPDATE budgets SET spent_usd = ?1, updated_at = ?2 WHERE project_tag = ?3",
+        rusqlite::params![new_spent, now, project_tag],
+    );
+
+    if limit <= 0.0 {
+        return;
+    }
+
+    let pct = new_spent / limit;
+
+    if pct >= 1.0 {
+        let _ = conn.execute(
+            "UPDATE budgets SET hard_locked_at = ?1 WHERE project_tag = ?2 AND hard_locked_at IS NULL",
+            rusqlite::params![now, project_tag],
+        );
+        emit_budget_alert(handle, project_tag, pct, new_spent, limit, "hard_lock");
+    } else if pct >= 0.85 && sent_85.is_none() {
+        let _ = conn.execute(
+            "UPDATE budgets SET alert_85_sent_at = ?1 WHERE project_tag = ?2",
+            rusqlite::params![now, project_tag],
+        );
+        emit_budget_alert(handle, project_tag, pct, new_spent, limit, "warning_85");
+    } else if pct >= 0.60 && sent_60.is_none() {
+        let _ = conn.execute(
+            "UPDATE budgets SET alert_60_sent_at = ?1 WHERE project_tag = ?2",
+            rusqlite::params![now, project_tag],
+        );
+        emit_budget_alert(handle, project_tag, pct, new_spent, limit, "warning_60");
+    }
+}
+
+fn emit_budget_alert(
+    handle: &tauri::AppHandle,
+    project_tag: &str,
+    pct: f64,
+    spent: f64,
+    limit: f64,
+    level: &str,
+) {
+    let _ = handle.emit("budget_alert", json!({
+        "projectTag":   project_tag,
+        "percentUsed":  pct * 100.0,
+        "level":        level,
+        "spentUsd":     spent,
+        "limitUsd":     limit,
+    }));
 }
 
 /// Genera el payload completo para el evento `metrics_update` del frontend.

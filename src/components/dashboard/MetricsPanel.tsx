@@ -5,6 +5,10 @@ import { CostTracker } from "./CostTracker";
 import { LatencyChart } from "./LatencyChart";
 import { TokenCounter } from "./TokenCounter";
 import { RequestFeed } from "./RequestFeed";
+import { ApiKeysPanel } from "../keys/ApiKeysPanel";
+import { BudgetPanel } from "../budget/BudgetPanel";
+import { RequestsPanel } from "../requests/RequestsPanel";
+import { SettingsPanel } from "../settings/SettingsPanel";
 import { useAppStore } from "../../stores/appStore";
 
 export function Dashboard() {
@@ -109,11 +113,10 @@ export function Dashboard() {
           </div>
         )}
 
-        {activeTab !== "dashboard" && (
-          <div className="flex items-center justify-center h-64 text-slate-500 text-sm">
-            Módulo en construcción — Fase {activeTab === "settings" ? "E" : "D/E"}
-          </div>
-        )}
+        {activeTab === "keys"      && <ApiKeysPanel />}
+        {activeTab === "budgets"   && <BudgetPanel />}
+        {activeTab === "requests"  && <RequestsPanel />}
+        {activeTab === "settings"  && <SettingsPanel />}
       </main>
     </div>
   );
