@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "IA Middleware — Multi-provider AI API Gateway"
 authors = []
 edition = "2021"
+default-run = "ia-middleware"
 
 [lib]
 name = "ia_middleware_lib"
